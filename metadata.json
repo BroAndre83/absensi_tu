@@ -1,0 +1,6 @@
+{
+  "name": "Absensi Pegawai Bintek SDA",
+  "description": "Aplikasi Absensi Pegawai Direktorat Bina Teknik Sumber Daya Air terhubung dengan Google Sheets dan sinkronisasi Bravo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

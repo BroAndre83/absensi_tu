@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 8mm;
+  }
+  header, footer, nav, button, .print\:hidden {
+    display: none !important;
+  }
+  body {
+    background-color: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+  th, td {
+    border: 1px solid #4b5563 !important;
+  }
+}
