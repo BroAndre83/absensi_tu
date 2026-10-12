@@ -7,7 +7,8 @@ import {
   ShieldCheck,
   Building2,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Globe
 } from 'lucide-react';
 import { getCurrentWIBTimeStringWithSeconds, getIndonesianFormattedDate, getIndonesianDayName } from '../utils/dateUtils';
 import { SheetConfig } from '../types';
@@ -18,6 +19,7 @@ interface HeaderProps {
   isConnectedToSheet: boolean;
   isLoading: boolean;
   onOpenSettings: () => void;
+  onOpenDomainBridge?: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
   onRefreshData: () => void;
@@ -29,6 +31,7 @@ export const Header: React.FC<HeaderProps> = ({
   isConnectedToSheet,
   isLoading,
   onOpenSettings,
+  onOpenDomainBridge,
   onSignIn,
   onSignOut,
   onRefreshData,
@@ -108,6 +111,19 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Bridge Custom Domain Button */}
+            {onOpenDomainBridge && (
+              <button
+                onClick={onOpenDomainBridge}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border bg-[#153B6E] hover:bg-[#1C4E91] text-amber-300 border-amber-400/30 transition-all shadow-sm"
+                title="Jembatan Custom Domain ke AI Studio (Node.js / Cloudflare)"
+              >
+                <Globe className="w-4 h-4 text-[#F59E0B]" />
+                <span className="hidden sm:inline">Bridge Domain</span>
+                <span className="sm:hidden">Domain</span>
+              </button>
+            )}
 
             {/* Google Sheets Status Button */}
             <div className="flex items-center gap-2">

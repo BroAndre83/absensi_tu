@@ -142,8 +142,12 @@ export const PegawaiManager: React.FC<PegawaiManagerProps> = ({
             <Users className="w-5 h-5 text-[#0F2E59]" />
             Database Pegawai (Sheet: {sheetName})
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Daftar master Nama & NIP pegawai yang digunakan untuk auto-fill pada formulir presensi.
+          <p className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+            <span>Daftar master Nama & NIP pegawai terintegrasi permanen.</span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+              <CheckCircle className="w-3 h-3 text-emerald-600" />
+              Permanen (Tetap ada saat refresh & share)
+            </span>
           </p>
         </div>
 

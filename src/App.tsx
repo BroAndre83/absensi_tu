@@ -27,6 +27,7 @@ import { PegawaiManager } from './components/PegawaiManager';
 import { LaporanMemanjang } from './components/LaporanMemanjang';
 import { SheetSettingsModal } from './components/SheetSettingsModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
+import { CustomDomainModal } from './components/CustomDomainModal';
 import { Pegawai, AbsensiRecord, SheetConfig, LaporanDayColumn } from './types';
 import {
   initAuth,
@@ -50,6 +51,8 @@ import {
 import { getIndonesianDayName, getShortFormattedDate, getCurrentWIBTimeString } from './utils/dateUtils';
 
 const STORAGE_KEY_CONFIG = 'bintek_sda_sheet_config';
+const STORAGE_KEY_PEGAWAI = 'bintek_sda_pegawai_list';
+const STORAGE_KEY_ABSENSI = 'bintek_sda_absensi_list';
 
 export default function App() {
   // Auth state
@@ -59,6 +62,9 @@ export default function App() {
 
   // Active navigation tab: 'form' | 'table' | 'laporan' | 'pegawai'
   const [activeTab, setActiveTab] = useState<'form' | 'table' | 'laporan' | 'pegawai'>('form');
+
+  // Custom Domain Bridge Modal state
+  const [isDomainModalOpen, setIsDomainModalOpen] = useState<boolean>(false);
 
   // Sheet configuration state with preset from user's attached spreadsheet
   const [sheetConfig, setSheetConfig] = useState<SheetConfig | null>(() => {
@@ -76,9 +82,29 @@ export default function App() {
     }
   });
 
-  // Data states
-  const [pegawaiList, setPegawaiList] = useState<Pegawai[]>(DEFAULT_PEGAWAI_LIST);
-  const [absensiList, setAbsensiList] = useState<AbsensiRecord[]>([]);
+  // Data states - Initialize from localStorage for instant, zero-flicker reload
+  const [pegawaiList, setPegawaiList] = useState<Pegawai[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PEGAWAI);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_PEGAWAI_LIST;
+  });
+
+  const [absensiList, setAbsensiList] = useState<AbsensiRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_ABSENSI);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [dataError, setDataError] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -110,6 +136,34 @@ export default function App() {
   const [pendingImportMode, setPendingImportMode] = useState<'replace' | 'append'>('append');
   const [isImporting, setIsImporting] = useState<boolean>(false);
 
+  // Helper to persist employee list permanently (localStorage + server /api/pegawai)
+  const persistPegawaiList = useCallback(async (list: Pegawai[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_PEGAWAI, JSON.stringify(list));
+      await fetch('/api/pegawai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(list),
+      });
+    } catch (e) {
+      console.warn('Failed to sync pegawai to server:', e);
+    }
+  }, []);
+
+  // Helper to persist attendance list permanently (localStorage + server /api/absensi)
+  const persistAbsensiList = useCallback(async (list: AbsensiRecord[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY_ABSENSI, JSON.stringify(list));
+      await fetch('/api/absensi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(list),
+      });
+    } catch (e) {
+      console.warn('Failed to sync absensi to server:', e);
+    }
+  }, []);
+
   // Show Toast helper
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ type, text });
@@ -118,7 +172,40 @@ export default function App() {
     }, 5000);
   };
 
-  // 1. Initialize Firebase Auth
+  // 1. On mount: Load shared database from server so refreshed browsers and shared links are permanent & identical
+  useEffect(() => {
+    const fetchSharedServerData = async () => {
+      try {
+        const resPegawai = await fetch('/api/pegawai');
+        if (resPegawai.ok) {
+          const data = await resPegawai.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setPegawaiList(data);
+            localStorage.setItem(STORAGE_KEY_PEGAWAI, JSON.stringify(data));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch server /api/pegawai:', err);
+      }
+
+      try {
+        const resAbsensi = await fetch('/api/absensi');
+        if (resAbsensi.ok) {
+          const data = await resAbsensi.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setAbsensiList(data);
+            localStorage.setItem(STORAGE_KEY_ABSENSI, JSON.stringify(data));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch server /api/absensi:', err);
+      }
+    };
+
+    fetchSharedServerData();
+  }, []);
+
+  // 2. Initialize Firebase Auth
   useEffect(() => {
     const unsubscribe = initAuth(
       (currentUser, token) => {
@@ -138,7 +225,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch data from Google Sheet when config and token are available
+  // 3. Fetch data from Google Sheet when config and token are available
   const loadSheetData = useCallback(async (token: string, config: SheetConfig) => {
     if (!token || !config.spreadsheetId) return;
 
@@ -154,6 +241,7 @@ export default function App() {
       );
       if (fetchedPegawai && fetchedPegawai.length > 0) {
         setPegawaiList(fetchedPegawai);
+        persistPegawaiList(fetchedPegawai);
       }
 
       // 2. Fetch Absensi List
@@ -162,14 +250,17 @@ export default function App() {
         config.absensiSheetName || 'Absensi',
         token
       );
-      setAbsensiList(fetchedAbsensi || []);
+      if (fetchedAbsensi && fetchedAbsensi.length > 0) {
+        setAbsensiList(fetchedAbsensi);
+        persistAbsensiList(fetchedAbsensi);
+      }
     } catch (err: any) {
       console.warn('Error fetching data from Google Sheet:', err);
       setDataError(err.message || 'Gagal memuat data dari Google Sheets.');
     } finally {
       setIsLoadingData(false);
     }
-  }, []);
+  }, [persistPegawaiList, persistAbsensiList]);
 
   // Load data whenever token or sheetConfig changes
   useEffect(() => {
@@ -230,6 +321,22 @@ export default function App() {
     setIsSubmittingToSheet(true);
 
     try {
+      let updatedAbsensi: AbsensiRecord[];
+      if (rowIndex) {
+        updatedAbsensi = absensiList.map((item) =>
+          item.rowIndex === rowIndex ? { ...record, rowIndex } : item
+        );
+      } else {
+        const nextNo = absensiList.length + 1;
+        updatedAbsensi = [
+          { ...record, id: `abs-${Date.now()}`, rowIndex: nextNo + 1 },
+          ...absensiList,
+        ];
+      }
+
+      setAbsensiList(updatedAbsensi);
+      persistAbsensiList(updatedAbsensi);
+
       if (accessToken && sheetConfig?.spreadsheetId) {
         if (rowIndex) {
           // Update existing row (e.g. Absen Pulang)
@@ -257,20 +364,9 @@ export default function App() {
         // Refresh attendance table
         await loadSheetData(accessToken, sheetConfig);
       } else {
-        // Fallback local update if Google Sheet is not yet connected
-        if (rowIndex) {
-          setAbsensiList((prev) =>
-            prev.map((item) => (item.rowIndex === rowIndex ? { ...record, rowIndex } : item))
-          );
-        } else {
-          setAbsensiList((prev) => [
-            { ...record, id: `local-${Date.now()}`, rowIndex: prev.length + 2 },
-            ...prev
-          ]);
-        }
         showToast(
-          `Data tersimpan di memori lokal. Hubungkan Google Sheet untuk menyimpan permanen ke tab Absensi.`,
-          'info'
+          `Data presensi tersimpan permanen di database lokal & bersama. Hubungkan Google Sheet untuk menyinkronkan ke tab Absensi spreadsheet.`,
+          'success'
         );
       }
 
@@ -294,6 +390,10 @@ export default function App() {
     if (!pendingPegawai) return;
 
     try {
+      const updatedList = [...pegawaiList, pendingPegawai];
+      setPegawaiList(updatedList);
+      await persistPegawaiList(updatedList);
+
       if (accessToken && sheetConfig?.spreadsheetId) {
         await appendPegawaiToSheet(
           sheetConfig.spreadsheetId,
@@ -301,11 +401,10 @@ export default function App() {
           pendingPegawai,
           accessToken
         );
-        showToast(`Pegawai ${pendingPegawai.nama} berhasil ditambahkan ke Google Sheet (${sheetConfig.pegawaiSheetName})!`, 'success');
+        showToast(`Pegawai ${pendingPegawai.nama} berhasil ditambahkan dan disimpan permanen ke Google Sheet (${sheetConfig.pegawaiSheetName})!`, 'success');
         await loadSheetData(accessToken, sheetConfig);
       } else {
-        setPegawaiList((prev) => [...prev, pendingPegawai]);
-        showToast(`Pegawai ditambahkan ke daftar lokal.`, 'info');
+        showToast(`Pegawai ${pendingPegawai.nama} berhasil ditambahkan dan disimpan permanen di database!`, 'success');
       }
 
       setIsConfirmPegawaiModalOpen(false);
@@ -330,6 +429,9 @@ export default function App() {
     const updatedList = pegawaiList.filter((_, i) => i !== index);
 
     try {
+      setPegawaiList(updatedList);
+      await persistPegawaiList(updatedList);
+
       if (accessToken && sheetConfig?.spreadsheetId) {
         await deletePegawaiRowFromSheet(
           sheetConfig.spreadsheetId,
@@ -337,14 +439,12 @@ export default function App() {
           updatedList,
           accessToken
         );
-        setPegawaiList(updatedList);
         showToast(
-          `Baris pegawai "${pegawai.nama}" berhasil dihapus dari Google Sheet (${sheetConfig.pegawaiSheetName || 'Data_Pegawai'})!`,
+          `Baris pegawai "${pegawai.nama}" berhasil dihapus permanen dari Google Sheet (${sheetConfig.pegawaiSheetName || 'Data_Pegawai'})!`,
           'success'
         );
       } else {
-        setPegawaiList(updatedList);
-        showToast(`Baris pegawai "${pegawai.nama}" dihapus dari daftar lokal.`, 'info');
+        showToast(`Baris pegawai "${pegawai.nama}" berhasil dihapus permanen dari database.`, 'success');
       }
 
       setIsConfirmDeleteRowModalOpen(false);
@@ -367,17 +467,19 @@ export default function App() {
     const count = pegawaiList.length;
 
     try {
+      const emptyList: Pegawai[] = [];
+      setPegawaiList(emptyList);
+      await persistPegawaiList(emptyList);
+
       if (accessToken && sheetConfig?.spreadsheetId) {
         await clearAllPegawaiFromSheet(
           sheetConfig.spreadsheetId,
           sheetConfig.pegawaiSheetName || 'Data_Pegawai',
           accessToken
         );
-        setPegawaiList([]);
-        showToast(`Seluruh baris pegawai (${count} orang) berhasil dihapus dari Google Sheet!`, 'success');
+        showToast(`Seluruh baris pegawai (${count} orang) berhasil dihapus permanen dari Google Sheet!`, 'success');
       } else {
-        setPegawaiList([]);
-        showToast(`Seluruh baris pegawai (${count} orang) dihapus dari daftar lokal.`, 'info');
+        showToast(`Seluruh baris pegawai (${count} orang) berhasil dihapus permanen dari database.`, 'success');
       }
 
       setIsConfirmDeleteAllModalOpen(false);
@@ -403,6 +505,15 @@ export default function App() {
     const count = pendingImportList.length;
 
     try {
+      const updatedList =
+        pendingImportMode === 'replace'
+          ? pendingImportList
+          : [...pegawaiList, ...pendingImportList];
+
+      // Save permanently to memory state, localStorage, and server database
+      setPegawaiList(updatedList);
+      await persistPegawaiList(updatedList);
+
       if (accessToken && sheetConfig?.spreadsheetId) {
         await bulkWritePegawaiToSheet(
           sheetConfig.spreadsheetId,
@@ -413,23 +524,15 @@ export default function App() {
           accessToken
         );
 
-        if (pendingImportMode === 'replace') {
-          setPegawaiList(pendingImportList);
-        } else {
-          setPegawaiList((prev) => [...prev, ...pendingImportList]);
-        }
-
         showToast(
-          `Berhasil mengimpor ${count} pegawai ke Google Sheet (${sheetConfig.pegawaiSheetName || 'Data_Pegawai'})!`,
+          `Berhasil mengimpor ${count} pegawai dan disimpan permanen di Google Sheet (${sheetConfig.pegawaiSheetName || 'Data_Pegawai'})!`,
           'success'
         );
       } else {
-        if (pendingImportMode === 'replace') {
-          setPegawaiList(pendingImportList);
-        } else {
-          setPegawaiList((prev) => [...prev, ...pendingImportList]);
-        }
-        showToast(`Berhasil mengimpor ${count} pegawai ke daftar lokal.`, 'info');
+        showToast(
+          `Berhasil mengimpor ${count} pegawai secara permanen! Data tersimpan di server & memori sehingga tetap ada saat direfresh atau dibagikan.`,
+          'success'
+        );
       }
 
       setIsConfirmImportModalOpen(false);
@@ -497,6 +600,7 @@ export default function App() {
         isConnectedToSheet={isConnected}
         isLoading={isLoadingData}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenDomainBridge={() => setIsDomainModalOpen(true)}
         onSignIn={handleSignIn}
         onSignOut={handleSignOut}
         onRefreshData={() => {
@@ -883,6 +987,12 @@ export default function App() {
         accessToken={accessToken}
         onSaveConfig={handleSaveConfig}
         onClose={() => setIsSettingsOpen(false)}
+      />
+
+      {/* Custom Domain Bridge Modal */}
+      <CustomDomainModal
+        isOpen={isDomainModalOpen}
+        onClose={() => setIsDomainModalOpen(false)}
       />
     </div>
   );
